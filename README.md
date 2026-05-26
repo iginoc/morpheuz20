@@ -1,26 +1,51 @@
-Morpheuz Sleep Monitor with Smart Alarm
-=======================================
+# Morpheuz 2.0 - Sleep & Activity Tracker for Pebble
 
-Do you ever wonder how well you sleep? The Morpheuz Sleep Monitor uses the Pebble's built in accelerometer to monitor your night's sleep and provide a graph of how much you moved overnight.
+Morpheuz 2.0 is a powerful health and activity monitoring application for Pebble smartwatches. It combines advanced sleep analysis with background step counting and provides native integration with smart home ecosystems like Home Assistant.
 
-Morpheuz is a watch app that monitors your movement and periodically transmits this information to your iPhone or Android phone, where the Javascript component within the Pebble app stores it. The Morpheuz configuration page in the Pebble app shows a graph, allows the setting of a smart alarm and resetting for the next night.
+## Key Features
 
-The "smart alarm" defines your earliest and latest wake up times. Morpheuz will do a alarm watch vibration if you stir during that time period or, should you remain motionless, at the end of that time period.
+*   **Background Step Counting**: Uses Pebble's background worker (or internal sensors) to track steps continuously, even when the main application is closed.
+*   **Intelligent Sleep Monitoring**: Automatically analyzes wrist movement to categorize sleep into **Deep Sleep**, **Light Sleep**, and **Awake** phases based on configurable thresholds.
+*   **7-Day Wrist History**: Includes built-in bar charts to visualize your activity and sleep quality trends over the last week directly on the watch.
+*   **Home Assistant Integration**: Seamlessly pushes your activity data (steps, sleep duration, and status) to a Home Assistant sensor via REST API using long-lived access tokens.
+*   **Smart Sync & Reset Logic**: To ensure data integrity, the daily stats are archived and reset only upon the first Bluetooth connection of the day, allowing you to check yesterday's totals before they are synchronized and cleared.
+*   **Automatic Sleep Mode**: The app can be configured to start monitoring automatically when Bluetooth connection is lost, making it ideal for users who leave their phone charging in another room overnight.
+*   **Minimalist UI**: A clean, high-contrast interface designed for quick readability, showing daily steps and current sleep status at a glance.
 
-No data is stored anywhere other than on the phone. Data is sent to the configuration page for graphing but this stores no information.
+## Home Assistant Integration
 
-It's simple to install. There is no iOS or Android app to buy, nothing to sign up for and it's free.
+The app communicates with Home Assistant through the PebbleKit JS layer. It updates an entity (default: `sensor.igi_activity`) with the following data:
+*   **State**: Total daily steps.
+*   **Attributes**:
+    *   `deep_sleep_min`: Total minutes of deep sleep.
+    *   `light_sleep_min`: Total minutes of light sleep.
+    *   `awake_min`: Minutes detected as awake during a sleep session.
+    *   `total_sleep_min`: Combined deep and light sleep duration.
+    *   `snoozes`: Number of alarm snoozes registered.
+    *   `friendly_name`: "Igi Activity Monitor".
 
-Please visit http://www.morpheuz.net for further information.
+## Configuration
 
-Sleep well.
+Configuration is managed through a dedicated offline page (Pebble Clay):
+1.  **HA URL**: The base URL of your Home Assistant instance (e.g., `http://192.168.1.10:8123`).
+2.  **HA Token**: Your Long-Lived Access Token generated from the Home Assistant profile page.
 
+## Controls
 
-Bug? Please report using http://www.morpheuz.net/p/bug-report.html
+*   **UP**: View the 7-day Steps History chart.
+*   **SELECT**: Open a confirmation menu to manually reset daily steps.
+*   **DOWN**: View the 7-day Sleep History chart.
+*   **BACK (Long Press)**: Close the application.
 
-Would like a new feature? Please use http://www.morpheuz.net/p/change-request.html
+## Technical Specifications
 
+*   **Platforms**: Compatible with Pebble Rectangular (Aplite, Basalt) and Round (Chalk) displays.
+*   **Persistence**: Uses Persistent Storage to maintain data logs locally.
+*   **Connectivity**: Uses `appmessage` for watch-to-phone communication and `XMLHttpRequest` for REST API calls.
 
-Full version history on http://www.morpheuz.net
+## Credits
 
+Original code by James Fowler. Custom enhancements, Home Assistant integration, and background worker logic by Igino.
 
+---
+*Morpheuz 2.0 - Tracking your movement, protecting your rest.*
