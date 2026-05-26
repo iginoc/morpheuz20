@@ -61,7 +61,6 @@ static void do_alarm(void *data) {
   // Reset powernap and finish alarm
   if (alarm_count >= ALARM_LIMIT) {
     power_nap_reset();
-    show_alarm_visuals(false);
   }
 
 }
@@ -72,7 +71,6 @@ static void do_alarm(void *data) {
 EXTFN void fire_alarm() {
   alarm_count = 0;
   do_alarm(NULL);
-  show_alarm_visuals(true);
 }
 
 /*
@@ -117,7 +115,4 @@ EXTFN void cancel_alarm() {
   power_nap_reset();
 
   // Clear the alarm indicator
-  show_alarm_visuals(false);
 }
-
-

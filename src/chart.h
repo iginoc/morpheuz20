@@ -26,7 +26,7 @@
 #include "morpheuz.h"
 
 // Change CHART_VER only if the ChartData struct changes
-#define CHART_VER 42
+#define CHART_VER 43
 typedef struct {
   uint8_t chart_ver;
   uint32_t base;
@@ -35,9 +35,4 @@ typedef struct {
   uint16_t points[LIMIT];
   bool ignore[LIMIT];
   uint8_t snoozes;
-  uint32_t from;
-  uint32_t to;
-  bool smart;
 } ChartData;
-
-

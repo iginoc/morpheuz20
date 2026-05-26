@@ -25,111 +25,199 @@
 #include "pebble.h"
 #include "morpheuz.h"
 #include "language.h"
+#include "steps_chart.h" // Include the new steps chart header
 #include "rootui.h"
-
-// Icons in the bitmap cache (if we are doing this)
-typedef enum {
-  BMP_CACHE_BATTERY_ICON,
-  BMP_CACHE_BATTERY_CHARGE,
-  BMP_CACHE_COMMS_ICON,
-  BMP_CACHE_BLUETOOTH_ICON,
-  BMP_CACHE_ICON_RECORD,
-  BMP_CACHE_ALARM_RING_ICON,
-  BMP_CACHE_ALARM_ICON,
-  BMP_CACHE_IGNORE,
-  BMP_CACHE_EXPORT,
-  BMP_CACHE_TOP
-} BmpCache;
-
-// A bitmap cache entry
-typedef struct {
-  GBitmap *bitmap;
-} BmpCacheEntry;
-
-// Only if we are caching icons do we declare this
-#ifdef CACHE_ICONS
-static BmpCacheEntry bmp_cache_entries[BMP_CACHE_TOP];
-#endif
  
 // Private  
-static bool icon_state[MAX_ICON_STATE];
-static uint8_t previous_mday = 255;
-static time_t last_clock_update;
-static char powernap_text[3];
 
 // Shared with rootui, rectui, roundui, primary_window with main and notice_font with noticewindows
 UiCommon ui;
 
+static AppTimer *ha_timer = NULL;
+
 // Shared with menu, rootui and presets 
 char date_text[DATE_FORMAT_LEN] = "";
 
-#ifdef CACHE_ICONS
+static bool icon_state[MAX_ICON_STATE];
+static int previous_mday = -1;
+
 /*
- * Set up the icon cache - make sure NULL for all entries
+ * Recupera il numero di passi ufficiale dal sistema Health di Pebble
+ * o dal persist storage per Aplite.
  */
-EXTFN void init_icon_cache() {
-  for (uint8_t i=0; i < BMP_CACHE_TOP; i++) {
-    bmp_cache_entries[i].bitmap = NULL;
+static uint32_t get_current_steps() {
+  if (persist_exists(PERSIST_STEPS_KEY)) {
+    return persist_read_int(PERSIST_STEPS_KEY);
   }
+  return get_internal_data()->steps; // Fallback per altre piattaforme o se non c'è gestione specifica
 }
 
 /*
- * Get a bitmap from cache, failing that from resources
+ * Esegue il reset dei passi e del sonno al cambio giorno rilevato (alla prima connessione BT)
  */
-static GBitmap* gbitmap_create_with_resource_cache(uint32_t resource_id, BmpCache cache_id) {
-  if (bmp_cache_entries[cache_id].bitmap == NULL) {
-    bmp_cache_entries[cache_id].bitmap = gbitmap_create_with_resource(resource_id);
+static void perform_daily_reset() {
+  // Archivia la cronologia dei passi prima di resettare
+  uint32_t current_steps = get_current_steps();
+  for (int i = NUM_DAILY_STEP_HISTORY_DAYS - 1; i > 0; i--) {
+    persist_write_int(PERSIST_DAILY_STEPS_0 + i, persist_read_int(PERSIST_DAILY_STEPS_0 + i - 1));
   }
-  return bmp_cache_entries[cache_id].bitmap;
+  persist_write_int(PERSIST_DAILY_STEPS_0, current_steps);
+  persist_write_int(PERSIST_DAILY_STEPS_BASE_KEY, time(NULL) - 86400); // Riferimento a "ieri"
+
+  // Archivia i dati del sonno accumulati finora nella cronologia 7 giorni
+  archive_daily_data();
+
+  // Reset dei passi
+  persist_write_int(PERSIST_STEPS_KEY, 0);
+  get_internal_data()->steps = 0;
+  persist_write_bool(PERSIST_GOAL_MET_KEY, false);
+
+  // Reset della sessione di sonno per il nuovo giorno
+  // Questo permette all'attivazione automatica di ripartire se il BT è ancora spento
+  InternalData *id = get_internal_data();
+  id->has_been_reset = false;
+  id->highest_entry = 0;
+  set_icon(false, IS_RECORD);
+  set_icon(false, IS_IGNORE);
+
+  LOG_INFO("Reset giornaliero passi completato");
 }
 
-/*
- * When caching we don't get rid of the bitmap
- */
-#define gbitmap_destroy_cache(bitmap)
-
-/*
- * Remove all the allocated icons
- */
-EXTFN void destroy_icon_cache() {
-  for (uint8_t i=0; i < BMP_CACHE_TOP; i++) {
-    if (bmp_cache_entries[i].bitmap != NULL) {
-      gbitmap_destroy(bmp_cache_entries[i].bitmap);
-    }
-  }
-}
-#else
-#define gbitmap_create_with_resource_cache(resource_id, cache_id) gbitmap_create_with_resource(resource_id)
-#define gbitmap_destroy_cache(bitmap) gbitmap_destroy(bitmap)
+// Fallback per il Resource ID se non ancora aggiunto nel pannello risorse/appinfo.json
+#ifndef RESOURCE_ID_NOTICE_STEP_GOAL_MET
+#define RESOURCE_ID_NOTICE_STEP_GOAL_MET RESOURCE_ID_NOTICE_TIMER_RESET_NOALARM
 #endif
 
-/*
- * Perform the clock update
- */
-static void update_clock() {
-  static char time_text[6];
-  clock_copy_time_string(time_text, sizeof(time_text));
-  if (time_text[4] == ' ')
-    time_text[4] = '\0';
-  text_layer_set_text(ui.text_time_layer, time_text);
-  #ifdef PBL_COLOR
-     text_layer_set_text(ui.text_time_shadow_layer, time_text); 
-  #endif
-  analogue_minute_tick();
-  last_clock_update = time(NULL);
+static void ha_timer_handler(void *data) {
+  // Invia esplicitamente i passi correnti al telefono
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) == APP_MSG_OK) {
+    dict_write_uint32(iter, KEY_STEPS, get_current_steps());
+    app_message_outbox_send();
+  }
+
+  ha_timer = app_timer_register(5000, ha_timer_handler, NULL);
 }
 
 /*
+ * Aggiorna il conteggio dei passi a video
+ */
+static void update_steps_display() {
+  uint32_t steps = get_current_steps();
+  static char steps_buffer[16];
+  snprintf(steps_buffer, sizeof(steps_buffer), "%lu", steps);
+  
+  // Controlla se l'obiettivo passi è stato raggiunto e mostra la notifica
+  if (steps >= STEP_GOAL) {
+    if (!persist_exists(PERSIST_GOAL_MET_KEY) || !persist_read_bool(PERSIST_GOAL_MET_KEY)) {
+      show_notice(RESOURCE_ID_NOTICE_STEP_GOAL_MET);
+      persist_write_bool(PERSIST_GOAL_MET_KEY, true); // Marca l'obiettivo come raggiunto per oggi
+    }
+  }
+  text_layer_set_text(ui.steps_layer, steps_buffer);
+}
+
+/*
+ * Aggiorna il conteggio del sonno a video
+ */
+static void update_sleep_display() {
+  static char sleep_buffer[48];
+  uint32_t last_light = persist_exists(PERSIST_DAILY_LIGHT_0) ? (uint32_t)persist_read_int(PERSIST_DAILY_LIGHT_0) : 0;
+  uint32_t last_deep = persist_exists(PERSIST_DAILY_DEEP_0) ? (uint32_t)persist_read_int(PERSIST_DAILY_DEEP_0) : 0;
+  uint32_t last_total = last_light + last_deep;
+
+  if (is_monitoring_sleep()) {
+    InternalData *id = get_internal_data();
+    int sleep_minutes = 0;
+    int i;
+
+    // Calcoliamo il sonno attuale: ogni segmento da 10 minuti con movimento < LIGHT_ABOVE
+    // è considerato tempo di sonno.
+    for (i = 0; i <= id->highest_entry; i++) {
+      if (id->points[i] < LIGHT_ABOVE && !id->ignore[i]) {
+        sleep_minutes += 10;
+      }
+    }
+    snprintf(sleep_buffer, sizeof(sleep_buffer), "In corso: %dh %02dm", sleep_minutes / 60, sleep_minutes % 60);
+  } else {
+    snprintf(sleep_buffer, sizeof(sleep_buffer), "Ult: %dh%02dm (P:%dh)", 
+             (int)last_total / 60, (int)last_total % 60, (int)last_deep / 60);
+  }
+  text_layer_set_text(ui.sleep_layer, sleep_buffer);
+}
+
+static Window *s_reset_steps_window;
+static MenuLayer *s_reset_steps_menu;
+
+static uint16_t reset_steps_menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
+  return 2;
+}
+
+static void reset_steps_menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
+  switch (cell_index->row) {
+    case 0: menu_cell_basic_draw(ctx, cell_layer, MENU_CANCEL, NULL, NULL); break;
+    case 1: menu_cell_basic_draw(ctx, cell_layer, MENU_RESET_STEPS_CONFIRM, NULL, NULL); break;
+  }
+}
+
+static int16_t reset_steps_menu_get_header_height_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
+  return MENU_CELL_BASIC_HEADER_HEIGHT;
+}
+
+static void reset_steps_menu_draw_header_callback(GContext* ctx, const Layer *cell_layer, uint16_t section_index, void *data) {
+  graphics_context_set_text_color(ctx, MENU_HEAD_COLOR);
+  graphics_draw_text(ctx, MENU_RESET_STEPS, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(0, -2, layer_get_bounds(cell_layer).size.w, 32), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+}
+
+static void reset_steps_menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
+  if (cell_index->row == 1) {
+    persist_write_int(PERSIST_STEPS_KEY, 0);
+    get_internal_data()->steps = 0;
+    persist_write_bool(PERSIST_GOAL_MET_KEY, false);
+    update_steps_display();
+    vibes_short_pulse();
+  }
+  window_stack_pop(true);
+}
+
+static void reset_steps_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+  s_reset_steps_menu = menu_layer_create(bounds);
+  menu_layer_set_callbacks(s_reset_steps_menu, NULL, (MenuLayerCallbacks) {
+    .get_num_rows = reset_steps_menu_get_num_rows_callback,
+    .draw_row = reset_steps_menu_draw_row_callback,
+    .get_header_height = reset_steps_menu_get_header_height_callback,
+    .draw_header = reset_steps_menu_draw_header_callback,
+    .select_click = reset_steps_menu_select_callback,
+  });
+  menu_layer_set_click_config_onto_window(s_reset_steps_menu, window);
+  layer_add_child(window_layer, menu_layer_get_layer_jf(s_reset_steps_menu));
+}
+
+static void reset_steps_window_unload(Window *window) {
+  menu_layer_destroy(s_reset_steps_menu);
+  window_destroy(window);
+  s_reset_steps_window = NULL;
+}
+
+static void show_reset_steps_confirmation() {
+  s_reset_steps_window = window_create();
+  window_set_window_handlers(s_reset_steps_window, (WindowHandlers) {
+    .load = reset_steps_window_load,
+    .unload = reset_steps_window_unload,
+  });
+  window_stack_push(s_reset_steps_window, true);
+}
+
+/*
+ * This function is no longer needed as the clock is not displayed.
  * Display the clock on movement (ensures if you start moving the clock is up to date)
  * Also fired from button press
  */
 EXTFN void revive_clock_on_movement(uint16_t last_movement) {
-
   if (last_movement >= CLOCK_UPDATE_THRESHOLD) {
-    time_t now = time(NULL);
-    if ((now - last_clock_update) > 60) {
-      update_clock();
-    }
+    // Removed clock update logic as clock is not displayed
   }
 }
 
@@ -137,53 +225,29 @@ EXTFN void revive_clock_on_movement(uint16_t last_movement) {
  * Back button single click handler
  */
 static void back_single_click_handler(ClickRecognizerRef recognizer, void *context) {
-  // Stop accidental closure of Morpheuz by defining this
-  // Bring clock up to date if a button is pressed
-  // Only if we're recording or running powernap
-  if (is_monitoring_sleep()) {
-    manual_shutdown_request();
-    revive_clock_on_movement(CLOCK_UPDATE_THRESHOLD);
-  } else {
-    close_morpheuz();  
-  }
+  close_morpheuz();  
 }
 
 /*
  * Single click handler on down button
  */
 static void down_single_click_handler(ClickRecognizerRef recognizer, void *context) {
-  revive_clock_on_movement(CLOCK_UPDATE_THRESHOLD);
-  // Make the snooze and the cancel buttons the same way around as the default alarm app  
-  cancel_alarm();
+  show_sleep_chart(); // Show sleep chart on DOWN press
 }
 
 /*
  * Single click handler on select button
  */
 static void select_single_click_handler(ClickRecognizerRef recognizer, void *context) {
-  // Bring clock up to date if a button is pressed
-  revive_clock_on_movement(CLOCK_UPDATE_THRESHOLD);
-  if (!is_notice_showing())
-    show_menu();
+  show_reset_steps_confirmation(); // Chiede se resettare i passi
 }
 
 /*
  * Single click handler on up button
  */
 static void up_single_click_handler(ClickRecognizerRef recognizer, void *context) {
-  revive_clock_on_movement(CLOCK_UPDATE_THRESHOLD);
-  // Make the snooze and the cancel buttons the same way around as the default alarm app
-  snooze_alarm();
+  show_steps_chart(); // Show the steps chart when the UP button is pressed
 }
-
-#ifdef VOICE_SUPPORTED
-/*
- * Long click handler on select button
- */
-static void select_click_handler_long(ClickRecognizerRef recognizer, void *context) {
-  voice_control();
-}
-#endif
 
 /*
  * Button config
@@ -193,9 +257,6 @@ static void click_config_provider(Window *window) {
   window_single_click_subscribe(BUTTON_ID_UP, up_single_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_single_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_single_click_handler);
-  #ifdef VOICE_SUPPORTED
-    window_long_click_subscribe(BUTTON_ID_SELECT, 0, select_click_handler_long, NULL);
-  #endif
 }
 
 /**
@@ -210,30 +271,50 @@ EXTFN bool is_animation_complete() {
  */
 EXTFN void post_init_hook(void *data) {
   wakeup_init();
-  ui.animation_count = 6; // Make it 6 so we consider is_animation_complete() will return true
-  layer_mark_dirty(ui.icon_bar);
+  update_steps_display();
+  update_sleep_display();
  
   // Set click provider
   window_set_click_config_provider(ui.primary_window, (ClickConfigProvider) click_config_provider);
 }
 
 /*
- * Bar chart color based on height of bar. Would normally do this with a constant array, but GColorXXXX aren't constants apparently.
+ * Archivia i dati giornalieri (passi e sonno) nella cronologia
+ * Questa funzione viene chiamata quando una sessione di sonno termina o viene resettata.
  */
-#ifdef PBL_COLOR
-EXTFN GColor bar_color(uint16_t height) {
-  if (height == 0) return GColorBlue; 
-  if (height == 1) return GColorBlueMoon;
-  if (height == 2) return GColorPictonBlue;
-  if (height == 3) return GColorVividCerulean;
-  if (height == 4) return GColorMalachite;
-  if (height == 5) return GColorBrightGreen;
-  if (height == 6) return GColorSpringBud;
-  if (height == 7) return GColorYellow;
-  return GColorPastelYellow;
+EXTFN void archive_daily_data() {
+    // Assicurati che ci sia un giorno precedente da archiviare
+    if (previous_mday == -1) {
+        return;
+    }
+
+    InternalData *id = get_internal_data();
+    uint32_t light_mins = 0;
+    uint32_t deep_mins = 0;
+    
+    // Calcola il sonno per il giorno che si è appena concluso
+    for (int j = 0; j <= id->highest_entry; j++) {
+      if (!id->ignore[j] && id->points[j] < LIGHT_ABOVE) {
+        if (id->points[j] <= DEEP_SLEEP_THRESHOLD) deep_mins += 10;
+        else light_mins += 10;
+      }
+    }
+
+    // Archivia la cronologia del sonno (sposta i dati vecchi, salva i nuovi)
+    for (int k = NUM_DAILY_STEP_HISTORY_DAYS - 1; k > 0; k--) {
+      persist_write_int(PERSIST_DAILY_LIGHT_0 + k, persist_read_int(PERSIST_DAILY_LIGHT_0 + k - 1));
+      persist_write_int(PERSIST_DAILY_DEEP_0 + k, persist_read_int(PERSIST_DAILY_DEEP_0 + k - 1));
+    }
+    persist_write_int(PERSIST_DAILY_LIGHT_0, light_mins);
+    persist_write_int(PERSIST_DAILY_DEEP_0, deep_mins);
+
+    // Aggiorna la data base per la cronologia del sonno
+    // Questo timestamp serve come riferimento per le date nel grafico
+    time_t yesterday = time(NULL) - (24 * 60 * 60);
+    persist_write_int(PERSIST_DAILY_STEPS_BASE_KEY, yesterday);
+
 }
-#endif
-  
+
   /*
  * Set the icon state for any icon
  */
@@ -256,17 +337,7 @@ EXTFN bool get_icon(IconState icon) {
  * Also now includes case where we have stopped recording and are ringing the alarm (including snoozed alarm)
  */
 EXTFN bool is_monitoring_sleep() {
-  return get_icon(IS_RECORD) || is_doing_powernap() || get_icon(IS_ALARM_RING);
-}
-
-/*
- * Set the smart alarm status details
- */
-EXTFN void set_smart_status_on_screen(bool smart_alarm_on, char *special_text) {
-  set_icon(smart_alarm_on, IS_ALARM);
-  #ifndef TESTING_MEMORY_LEAK
-  text_layer_set_text(ui.text_date_smart_alarm_range_layer, smart_alarm_on ? special_text : date_text);
-  #endif
+  return get_icon(IS_RECORD);
 }
 
 /*
@@ -284,26 +355,12 @@ static void paint_icon(GContext *ctx, int *running_horizontal, int width, uint32
  */
 static void battery_layer_update_callback(Layer *layer, GContext *ctx, int *running_horizontal) {
 
-  #ifdef PBL_COLOR
-    graphics_context_set_compositing_mode(ctx, GCompOpSet);
-  #else
-    graphics_context_set_compositing_mode(ctx, GCompOpAssign);
-  #endif
+  graphics_context_set_compositing_mode(ctx, GCompOpAssign);
 
   if (!ui.battery_plugged) {
     paint_icon(ctx, running_horizontal, 24, RESOURCE_ID_BATTERY_ICON, BMP_CACHE_BATTERY_ICON);
     graphics_context_set_stroke_color(ctx, BACKGROUND_COLOR);
-    #ifdef PBL_COLOR
-      GColor b_color = BATTERY_BAR_COLOR;
-      if (ui.battery_level <= 20) {
-        b_color = BATTERY_BAR_COLOR_CRITICAL;
-      } else if (ui.battery_level <= 40) {
-        b_color = BATTERY_BAR_COLOR_WARN;
-      }
-      graphics_context_set_fill_color(ctx, b_color);
-    #else
-      graphics_context_set_fill_color(ctx, BATTERY_BAR_COLOR);
-    #endif
+    graphics_context_set_fill_color(ctx, BATTERY_BAR_COLOR);
     graphics_fill_rect(ctx, GRect(*running_horizontal + 7, 4, ui.battery_level / 9, 4), 0, GCornerNone);
   } else {
     paint_icon(ctx, running_horizontal, 24, RESOURCE_ID_BATTERY_CHARGE, BMP_CACHE_BATTERY_CHARGE);
@@ -322,10 +379,6 @@ EXTFN void icon_bar_update_callback(Layer *layer, GContext *ctx) {
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_context_set_stroke_color(ctx, GColorBlack);
-
-#ifdef PBL_COLOR
-  graphics_context_set_compositing_mode(ctx, GCompOpSet);
-#endif
 
   // Don't draw if we're currently doing
   if (!is_animation_complete())
@@ -346,20 +399,9 @@ EXTFN void icon_bar_update_callback(Layer *layer, GContext *ctx) {
     paint_icon(ctx, &running_horizontal, 10, RESOURCE_ID_ICON_RECORD, BMP_CACHE_ICON_RECORD);
   }
 
-  // Alarm icon
-  if (icon_state[IS_ALARM_RING] || icon_state[IS_ALARM]) {
-    paint_icon(ctx, &running_horizontal, 12, icon_state[IS_ALARM_RING] ? RESOURCE_ID_ALARM_RING_ICON : RESOURCE_ID_ALARM_ICON,
-              icon_state[IS_ALARM_RING] ? BMP_CACHE_ALARM_RING_ICON : BMP_CACHE_ALARM_ICON);
-  }
-
   // Ignore icon
   if (icon_state[IS_IGNORE]) {
     paint_icon(ctx, &running_horizontal, 9, RESOURCE_ID_IGNORE, BMP_CACHE_IGNORE );
-  }
-
-  // Export icon
-  if (icon_state[IS_EXPORT]) {
-    paint_icon(ctx, &running_horizontal, 9, RESOURCE_ID_EXPORT, BMP_CACHE_EXPORT);
   }
 
 }
@@ -386,18 +428,16 @@ EXTFN void progress_layer_update_callback(Layer *layer, GContext *ctx) {
   
   graphics_context_set_stroke_width(ctx, 2);
 
-  for (uint8_t i = 0; i <= 120; i += 12) {
+  uint8_t i;
+  for (i = 0; i <= 120; i += 12) {
     graphics_draw_pixel(ctx, GPoint(i, 8));
     graphics_draw_pixel(ctx, GPoint(i, 7));
   }
 
-  for (uint8_t i = 0; i <= get_internal_data()->highest_entry; i++) {
+  for (i = 0; i <= get_internal_data()->highest_entry; i++) {
     if (!get_internal_data()->ignore[i]) {
       uint16_t height = get_internal_data()->points[i] / 500;
       uint8_t i2 = i * 2;
-      #ifdef PBL_COLOR
-          graphics_context_set_stroke_color(ctx, bar_color(height));
-      #endif
       graphics_draw_line(ctx, GPoint(i2, 8 - height), GPoint(i2, 8));
     }
   }
@@ -410,35 +450,33 @@ EXTFN void progress_layer_update_callback(Layer *layer, GContext *ctx) {
  */
 static void handle_minute_tick(struct tm *tick_time, TimeUnits units_changed) {
 
-  #ifndef TESTING_MEMORY_LEAK
-    // Only update the date if the day has changed
-    if (tick_time->tm_mday != previous_mday) {
-      strftime(date_text, sizeof(date_text), DATE_FORMAT, tick_time);
-      if (!icon_state[IS_ALARM])
-        text_layer_set_text(ui.text_date_smart_alarm_range_layer, date_text);
-      previous_mday = tick_time->tm_mday;
+  // Aggiornamento grafico della data a mezzanotte
+  static int last_ui_mday = -1;
+  if (tick_time->tm_mday != last_ui_mday) {
+    strftime(date_text, sizeof(date_text), DATE_FORMAT, tick_time);
+    last_ui_mday = tick_time->tm_mday;
+  }
+
+  // Esegui il reset solo se il giorno è cambiato E il Bluetooth è attualmente attivo
+  if (tick_time->tm_mday != previous_mday && bluetooth_connection_service_peek()) {
+    if (previous_mday != -1) {
+      perform_daily_reset();
     }
+    previous_mday = tick_time->tm_mday;
+    persist_write_int(PERSIST_LAST_MDAY, previous_mday);
+  }
+
+  #ifndef TESTING_MEMORY_LEAK
   #else
     // Use the line to show heap space in testing mode
     snprintf(date_text, sizeof(date_text), "%d", heap_bytes_free());
-    text_layer_set_text(text_date_smart_alarm_range_layer, date_text);
+    text_layer_set_text(ui.text_date_smart_alarm_range_layer, date_text);
   #endif
 
-  // Perform all background processing
-  uint16_t last_movement;
-  if (is_animation_complete()) {
-    last_movement = every_minute_processing();
-  } else {
-    last_movement = CLOCK_UPDATE_THRESHOLD;
-  }
-  
-  // Do the power nap countdown
-  power_nap_countdown();
-
-  // Only update the clock every five minutes unless awake
-  if (last_movement >= CLOCK_UPDATE_THRESHOLD || (tick_time->tm_min % 5 == 0)) {
-    update_clock();
-  }
+  // every_minute_processing() è già chiamato qui e gestisce il monitoraggio del sonno
+  every_minute_processing(); // Gestione dati sonno e trasmissione punti (1 volta al minuto)
+  update_steps_display();
+  update_sleep_display();
 }
 
 /*
@@ -446,8 +484,21 @@ static void handle_minute_tick(struct tm *tick_time, TimeUnits units_changed) {
  */
 static void bluetooth_state_handler(bool connected) {
   set_icon(connected, IS_BLUETOOTH);
-  if (!connected)
+  if (connected) {
+    // Al momento della connessione, controlla se è necessario un reset giornaliero pendente
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    if (t->tm_mday != previous_mday) {
+      if (previous_mday != -1) {
+        perform_daily_reset();
+      }
+      previous_mday = t->tm_mday;
+      persist_write_int(PERSIST_LAST_MDAY, previous_mday);
+    }
+  } else {
     set_icon(false, IS_COMMS); // because we only set comms state on NAK/ACK it can be at odds with BT state - do this else that is confusing
+  }
+  update_sleep_display();
 }
 
 /*
@@ -459,29 +510,22 @@ EXTFN void set_progress() {
 }
 
 /*
- * Set the power nap text for the display
- */
-EXTFN void analogue_powernap_text(char *text) {
-  strncpy(powernap_text, text, sizeof(powernap_text));
-  text_layer_set_text(ui.powernap_layer, powernap_text);
-}
-
-/*
- * Show the alarm hint buttons and set icon
- */
-EXTFN void show_alarm_visuals(bool value) {
-  set_icon(value, IS_ALARM_RING);
-  layer_set_hidden(bitmap_layer_get_layer_jf(ui.alarm_button_top.layer), !value);
-  layer_set_hidden(bitmap_layer_get_layer_jf(ui.alarm_button_button.layer), !value);
-}
-
-/*
  * Common stuff we always do at the end of setup
  */
 EXTFN void morpheuz_load_standard_postamble() {
   read_internal_data();
   read_config_data();
   
+  // Carica l'ultimo giorno gestito per rilevare cambi di data (es. app chiusa a mezzanotte)
+  if (persist_exists(PERSIST_LAST_MDAY)) {
+    previous_mday = persist_read_int(PERSIST_LAST_MDAY);
+  }
+
+  // Inizializza la base della cronologia se non esiste (fondamentale per i primi grafici)
+  if (!persist_exists(PERSIST_DAILY_STEPS_BASE_KEY)) {
+    persist_write_int(PERSIST_DAILY_STEPS_BASE_KEY, time(NULL));
+  }
+
   // Start clock
   tick_timer_service_subscribe(MINUTE_UNIT, handle_minute_tick);
   
@@ -492,6 +536,13 @@ EXTFN void morpheuz_load_standard_postamble() {
   bluetooth_connection_service_subscribe(bluetooth_state_handler);
 
   init_morpheuz();
+
+  // Aggiorna immediatamente lo schermo con i dati caricati
+  update_steps_display();
+  update_sleep_display();
+
+  // Avvia il timer per l'invio dati a Home Assistant ogni 5 secondi
+  ha_timer = app_timer_register(5000, ha_timer_handler, NULL);
 
   light_enable_interaction();
 }

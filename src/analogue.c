@@ -44,9 +44,6 @@ static GPath *hour_arrow;
 static Layer *hands_layer;
 static struct PropertyAnimation* analogue_animation;
 
-static bool show_smart_points;
-static int16_t from_time;
-static int16_t to_time;
 static int16_t start_time;
 static int16_t start_time_round;
 static int16_t progress_1;
@@ -105,12 +102,6 @@ static void bg_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_compositing_mode(ctx, GCompOpSet);
   #endif
 
-  // Start and first and last times for smart alarm
-  if (show_smart_points) {
-    draw_marks(layer, ctx, OUTER_STOP, OUTER, from_time, from_time + 1, 1, WIDTH_SMART_POINTS, FROM_TIME_COLOR);
-    draw_marks(layer, ctx, OUTER_STOP, OUTER, to_time, to_time + 1, 1, WIDTH_SMART_POINTS, TO_TIME_COLOR);
-  }
-
   // Minute marks
   draw_marks(layer, ctx, MIN, CLOCK, 0, 1440, MINUTE_STEP, WIDTH_MINUTES, MINUTE_MARK_COLOR);
 
@@ -136,11 +127,6 @@ static void bg_update_proc(Layer *layer, GContext *ctx) {
  * Record the smart times for display on the analogue clock. Trigger an update of the layer.
  */
 EXTFN void analogue_set_smart_times() {
-  show_smart_points = get_config_data()->smart;
-  from_time = (get_config_data()->from * 2) % 1440;
-  to_time = (get_config_data()->to * 2) % 1440;
-  if (is_visible)
-    layer_mark_dirty(analogue_layer);
 }
 
 /*
@@ -223,9 +209,6 @@ EXTFN void analogue_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
 
   // Init internal state used by bg_update_proc
-  show_smart_points = false;
-  from_time = 0;
-  to_time = 0;
   start_time = -1;
   start_time_round = 0;
   progress_1 = -1;
@@ -297,4 +280,3 @@ EXTFN void analogue_window_unload() {
 #endif
   
 #endif
-

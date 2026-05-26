@@ -26,79 +26,33 @@
 #include "language.h"
 #include "analogue.h"
 
-static bool power_nap_mode = false;
-static int16_t power_nap_minute_count = 0;
-static uint8_t power_nap_settle_count = 0;
-
 /*
  * Power nap reset
  */
 EXTFN void power_nap_reset() {
-  power_nap_mode = false;
-  analogue_powernap_text(POWER_NAP_OFF_INDICATOR);
 }
 
 /*
  * Power nap settle check
  */
 EXTFN void power_nap_check(uint16_t biggest) {
-
-  if (!power_nap_mode)
-    return;
-
-  if (power_nap_settle_count == 0)
-    return;
-
-  if (biggest < AWAKE_ABOVE)
-    power_nap_settle_count--;
 }
 
 /*
  * Power nap countdown
  */
 EXTFN void power_nap_countdown() {
-
-  if (!power_nap_mode)
-    return;
-
-  if (power_nap_settle_count != 0)
-    return;
-
-  if (power_nap_minute_count == 0)
-    return;
-
-  power_nap_minute_count--;
-
-  char power_nap_ind[3];
-  snprintf(power_nap_ind, sizeof(power_nap_ind), "%d", power_nap_minute_count);
-  analogue_powernap_text(power_nap_ind);
-
-  if (power_nap_minute_count == 0)
-    fire_alarm();
 }
 
 /**
  * power nap
  */
 EXTFN void toggle_power_nap() {
-  // Toggle sleep
-  if (power_nap_mode) {
-    // Turn off power nap
-    power_nap_reset();
-  } else {
-    // Turn on power nap
-    power_nap_mode = true;
-    power_nap_minute_count = POWER_NAP_MINUTES + 1;
-    power_nap_settle_count = POWER_NAP_SETTLE;
-    analogue_powernap_text(POWER_NAP_SETTLE_INDICATOR);
-  }
 }
 
 /*
  * Are we doing a powernap?
  */
 EXTFN bool is_doing_powernap() {
-  return power_nap_mode;
+  return false;
 }
-
-

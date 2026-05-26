@@ -113,30 +113,9 @@ static void write_values_to_fields() {
 }
 
 /*
- * Convert back to 24 hour clock
- */
-static uint8_t hour_from_fields(int hour, int ampm) {
-  if (is24hr) {
-    return hour;
-  } else {
-    return (hour == 12 ? 0 : hour) + ampm * 12;
-  }
-}
-
-/*
  * Drop values back into the rest of the system
  */
 static void return_values() {
-  get_config_data()->smart = true;
-  get_config_data()->fromhr = hour_from_fields(values[F_FROM_HOUR],values[F_FROM_AMPM]);
-  get_config_data()->frommin = values[F_FROM_MINUTE];
-  get_config_data()->tohr = hour_from_fields(values[F_TO_HOUR],values[F_TO_AMPM]);
-  get_config_data()->tomin = values[F_TO_MINUTE];
-  get_config_data()->from = to_mins(get_config_data()->fromhr, get_config_data()->frommin);
-  get_config_data()->to = to_mins(get_config_data()->tohr, get_config_data()->tomin);
-  resend_all_data(true); // Force resend - we've fiddled with the times
-  trigger_config_save();
-  set_smart_status();
 }
 
 /*
@@ -268,14 +247,6 @@ static void setting_click_config_provider(void *context) {
  * Set the fields to the values from the rest of the system
  */
 static void set_values() {
-  values[F_FROM_HOUR] = twenty_four_to_twelve(get_config_data()->fromhr);
-  values[F_FROM_MINUTE] = get_config_data()->frommin;
-  values[F_TO_HOUR] = twenty_four_to_twelve(get_config_data()->tohr);
-  values[F_TO_MINUTE] = get_config_data()->tomin;
-  if (!is24hr) {
-    values[F_FROM_AMPM] = get_config_data()->fromhr >= 12 ? 1 : 0;
-    values[F_TO_AMPM] = get_config_data()->tohr >= 12 ? 1 : 0;
-  }
 }
 
 /*
@@ -369,4 +340,3 @@ EXTFN void show_set_alarm() {
   window_set_window_handlers(setting_window, (WindowHandlers ) { .unload = handle_window_unload, });
   window_stack_push(setting_window, true);
 }
-

@@ -44,16 +44,6 @@ static void set_error_code(uint8_t new_error_code) {
 }
 
 /*
- * Set the on-screen status text
- */
-EXTFN void set_smart_status() {
-  static char status_text[TIME_RANGE_LEN];
-  copy_alarm_time_range_into_field(status_text, sizeof(status_text));
-  set_smart_status_on_screen(get_config_data()->smart, status_text);
-  analogue_set_smart_times();
-}
-
-/*
  * Accumumate samples every minute
  */
 EXTFN uint16_t every_minute_processing() {
@@ -73,7 +63,7 @@ EXTFN uint16_t every_minute_processing() {
   
   // Accumulate samples, fire every minute processing
   uint16_t last_biggest = biggest_movement_in_one_minute;
-  power_nap_check(biggest_movement_in_one_minute);
+
   server_processing(biggest_movement_in_one_minute);
   biggest_movement_in_one_minute = 0;
   return last_biggest;
@@ -115,6 +105,9 @@ static void do_axis(int16_t val, uint16_t *biggest, uint32_t avg) {
  * Process accelerometer data
  */
 static void accel_data_handler(AccelData *data, uint32_t num_samples) {
+#if !defined(PBL_PLATFORM_APLITE)
+  static bool step_high = false;
+#endif
   
   #ifndef ACC_FAILURE_TEST
   // Last time callback was invoked
@@ -130,14 +123,24 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
     // If vibe went off then discount everything - we're only loosing a 2.5 second set of samples, better than an
     // unwanted spike. We count these as more than 48 (i.e. 2 minutes) in a row this might indicate a problem. We disregard if we are sounding the alarm.
     if (dx->did_vibrate) {
-      if (!get_icon(IS_ALARM_RING)) {
-        vibrates_in_a_row++;
-      }
+      vibrates_in_a_row++;
       return;
     }
     avg_x += scale_accel(dx->x);
     avg_y += scale_accel(dx->y);
     avg_z += scale_accel(dx->z);
+
+#if !defined(PBL_PLATFORM_APLITE) // Solo se non siamo su Aplite, l'app principale gestisce i passi internamente
+    // Semplice rilevamento passi (Peak Detection) per l'app principale
+    // Calcoliamo la magnitudo vettoriale approssimativa
+    int32_t magnitude = (dx->x * dx->x) + (dx->y * dx->y) + (dx->z * dx->z);
+    if (!step_high && magnitude > 1500000) { // Superamento soglia (~1.2G)
+      get_internal_data()->steps++; // Incrementa i passi interni dell'app
+      step_high = true;
+    } else if (step_high && magnitude < 1000000) { // Ritorno a riposo (~1.0G)
+      step_high = false;
+    }
+#endif
   }
   
   vibrates_in_a_row = 0;
@@ -171,10 +174,4 @@ EXTFN void init_morpheuz() {
   // Accelerometer
   accel_data_service_subscribe(25, accel_data_handler);
   accel_service_set_sampling_rate(ACCEL_SAMPLING_10HZ);
-
-  // Set the smart status
-  set_smart_status();
 }
-
-
-

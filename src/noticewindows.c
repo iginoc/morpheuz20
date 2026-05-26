@@ -25,6 +25,7 @@
 #include "pebble.h"
 #include "morpheuz.h"
 #include "language.h"
+#include "steps_chart.h" // Include for is_steps_chart_showing()
 #include "rootui.h"
   
 #define MOON_START GRect(width+6, 72, 58, 46)  
@@ -123,7 +124,7 @@ static void notice_click_config_provider(Window *window) {
 EXTFN void show_notice_with_message(uint32_t resource_id, char *message) {
   
   // If the menu or voice is showing then it is rude to interup
-  if (menu_live || is_voice_system_active() || is_chart_showing()) {
+  if (menu_live || is_voice_system_active() || is_chart_showing() || is_steps_chart_showing() || is_sleep_chart_showing()) {
     return;
   }
 
@@ -188,4 +189,3 @@ EXTFN void show_notice(uint32_t resource_id) {
 EXTFN bool is_notice_showing() {
   return notice_showing;
 }
-

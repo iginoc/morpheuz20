@@ -43,8 +43,6 @@
       fromminDef : "30",
       tohrDef : "7",
       tominDef : "15",
-      pushoverAPI : "https://api.pushover.net/1/messages.json",
-      smartwatchProAPI : "http://2hk.smartwatch.pro/?source=Morpheuz&starts=",
       ctrlTransmitDone : 1,
       ctrlVersionDone : 2,
       ctrlGoneOffDone : 4,
@@ -53,16 +51,8 @@
       ctrlLazarus : 32,
       ctrlSnoozesDone : 64,
       displayDateFmt : "WWW, NNN dd, yyyy hh:mm",
-      swpUrlDate : "yyyy-MM-ddThh:mm:00",
       timeout : 4000,
-      quotesUrl : urlPrefix + "quotes.json",
-      hueTimeout : 3000,
-      urlNotReady : urlPrefix + "view-not-ready.html",
-      makerDefaultServer : "https://maker.ifttt.com/",
-      makerAlarmUrl : "trigger/morpheuz_alarm/with/key/",
-      makerDataUrl : "trigger/morpheuz_data/with/key/",
-      makerBedtimeUrl : "trigger/morpheuz_bedtime/with/key/",
-      lifxTimeDef : 60
+      urlNotReady : urlPrefix + "view-not-ready.html"
     };
   };
   /*

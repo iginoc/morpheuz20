@@ -28,16 +28,12 @@
   'use strict';
 
   var MorpheuzUtil = require("./morpheuzUtil");
-  var MorpheuzAjax = require("./morpheuzAjax");
   var MorpheuzConfig = require("./morpheuzConfig");
-  var MorpheuzPushover = require("./morpheuzPushover");
-  var MorpheuzUsage = require("./morpheuzUsage");
-  var MorpheuzIFTTT = require("./morpheuzIFTTT");
-  var MorpheuzHue = require("./morpheuzHue");
-  var MorpheuzTimeline = require("./morpheuzTimeline");
-  var MorpheuzEmail = require("./morpheuzEmail");
-  var MorpheuzSWP = require("./morpheuzSWP");
   var MorpheuzCommon = require("./morpheuzCommon");
+
+  var Clay = require('pebble-clay');
+  var clayConfig = require('./config_clay');
+  var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 
   /*
    * Reset log
@@ -50,92 +46,23 @@
       n : "version",
       d : MorpheuzConfig.mConst().versionDef
     }, {
-      n : "smart",
-      d : MorpheuzConfig.mConst().smartDef
-    }, {
-      n : "fromhr",
-      d : MorpheuzConfig.mConst().fromhrDef
-    }, {
-      n : "frommin",
-      d : MorpheuzConfig.mConst().fromminDef
-    }, {
-      n : "tohr",
-      d : MorpheuzConfig.mConst().tohrDef
-    }, {
-      n : "tomin",
-      d : MorpheuzConfig.mConst().tominDef
-    }, {
-      n : "emailto",
-      d : ""
-    }, {
-      n : "pouser",
-      d : ""
-    }, {
-      n : "postat",
-      d : ""
-    }, {
-      n : "potoken",
-      d : ""
-    }, {
-      n : "swpdo",
-      d : ""
-    }, {
-      n : "swpstat",
-      d : ""
-    }, {
-      n : "exptime",
-      d : ""
-    }, {
-      n : "usage",
-      d : "Y"
-    }, {
-      n : "lazarus",
-      d : "Y"
-    }, {
       n : "autoReset",
       d : "0"
     }, {
-      n : "quote",
+      n : "base",
+      d : "0"
+    }, {
+      n : "haurl",
       d : ""
     }, {
-      n : "lifx-token",
+      n : "hatoken",
       d : ""
     }, {
-      n : "lifx-time",
-      d : MorpheuzConfig.mConst().lifxTimeDef
+      n : "steps",
+      d : "0"
     }, {
-      n : "hueip",
-      d : ""
-    }, {
-      n : "hueusername",
-      d : ""
-    }, {
-      n : "hueid",
-      d : ""
-    }, {
-      n : "ifkey",
-      d : ""
-    }, {
-      n : "ifserver",
-      d : ""
-    }, {
-      n : "ifstat",
-      d : ""
-    }, {
-      n : "age",
-      d : ""
-    }, {
-      n : "doemail",
-      d : ""
-    }, {
-      n : "estat",
-      d : ""
-    }, {
-      n : "lat",
-      d : ""
-    }, {
-      n : "long",
-      d : ""
+      n : "clay-settings",
+      d : null
     } ];
 
     // Remember the keep list
@@ -151,7 +78,9 @@
     // Restore from keep list
     for (var j = 0; j < keep.length; j++) {
       var kj = keep[j];
-      MorpheuzUtil.setWithDef(kj.n, kj.v, kj.d);
+      if (kj.v !== null && kj.v !== "null") {
+        MorpheuzUtil.setWithDef(kj.n, kj.v, kj.d);
+      }
     }
   }
 
@@ -179,26 +108,6 @@
   }
 
   /*
-   * Found location
-   */
-  function locationSuccess(pos) {
-    var pLat = pos.coords.latitude.toFixed(1);
-    var pLong = pos.coords.longitude.toFixed(1);
-    console.log('lat=' + pLat + ', long=' + pLong);
-    MorpheuzUtil.setNoDef("lat", pLat);
-    MorpheuzUtil.setNoDef("long", pLong);
-  }
-
-  /*
-   * No location, or forbidden
-   */
-  function locationError(err) {
-    console.log('location error (' + err.code + '): ' + err.message);
-    MorpheuzUtil.setNoDef("lat", "");
-    MorpheuzUtil.setNoDef("long", "");
-  }
-
-  /*
    * Process ready from the watch
    */
   Pebble.addEventListener("ready", function(e) {
@@ -208,18 +117,8 @@
     if (smartStr === null || smartStr === "null") {
       resetWithPreserve();
     }
-    MorpheuzTimeline.getQuoteOfTheDay();
 
-    // Choose options about the data returned
-    var options = {
-      enableHighAccuracy : true,
-      maximumAge : 10000,
-      timeout : 10000
-    };
-
-    // Request current position
-    navigator.geolocation.getCurrentPosition(locationSuccess, locationError, options);
-
+    setInterval(transmitHA, 5000);
   });
 
   /*
@@ -249,10 +148,6 @@
       console.log("MSG version=" + version);
       MorpheuzUtil.setNoDef("version", version);
       ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlVersionDone;
-      var lazarus = MorpheuzUtil.getNoDef("lazarus");
-      if (lazarus !== "N") {
-        ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlLazarus;
-      }
     }
 
     // Incoming origin timestamp - this is a reset
@@ -264,73 +159,14 @@
       resetWithPreserve();
       MorpheuzUtil.setNoDef("base", base);
       ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlDoNext | MorpheuzConfig.mConst().ctrlSetLastSent;
-      MorpheuzIFTTT.iftttMakerInterfaceBedtime();
     }
 
-    // Incoming from value (first time for smart alarm)
-    if (typeof e.payload.keyFrom !== "undefined") {
-      var from = parseInt(e.payload.keyFrom, 10);
-      var fromhr = MorpheuzConfig.mConst().fromhrDef;
-      var frommin = MorpheuzConfig.mConst().fromminDef;
-      var fsmart = MorpheuzConfig.mConst().smartDef;
-      if (from !== -1) {
-        var fhours = Math.floor(from / 60);
-        var fminutes = from - fhours * 60;
-        fromhr = MorpheuzCommon.fixLen(String(fhours));
-        frommin = MorpheuzCommon.fixLen(String(fminutes));
-        fsmart = "Y";
-      }
-      MorpheuzUtil.setNoDef("fromhr", fromhr);
-      MorpheuzUtil.setNoDef("frommin", frommin);
-      MorpheuzUtil.setNoDef("smart", fsmart);
-      console.log("MSG from=" + from + ", smart=" + fsmart + ", fromhr=" + fromhr + ", frommin=" + frommin);
-      ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlDoNext | MorpheuzConfig.mConst().ctrlSetLastSent;
-    }
-
-    // Incoming to value (second time for smart alarm)
-    if (typeof e.payload.keyTo !== "undefined") {
-      var to = parseInt(e.payload.keyTo, 10);
-      var tohr = MorpheuzConfig.mConst().tohrDef;
-      var tomin = MorpheuzConfig.mConst().tominDef;
-      var tsmart = MorpheuzConfig.mConst().smartDef;
-      if (to !== -1) {
-        var thours = Math.floor(to / 60);
-        var tminutes = to - thours * 60;
-        tohr = MorpheuzCommon.fixLen(String(thours));
-        tomin = MorpheuzCommon.fixLen(String(tminutes));
-        tsmart = "Y";
-      }
-      MorpheuzUtil.setNoDef("tohr", tohr);
-      MorpheuzUtil.setNoDef("tomin", tomin);
-      MorpheuzUtil.setNoDef("smart", tsmart);
-      console.log("MSG to=" + to + ", smart=" + tsmart + ", tohr=" + tohr + ", tomin=" + tomin);
-      ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlDoNext | MorpheuzConfig.mConst().ctrlSetLastSent;
-    }
-
-    // Incoming gone off value
-    if (typeof e.payload.keyGoneoff !== "undefined") {
-      var goneoffNum = parseInt(e.payload.keyGoneoff, 10);
-      var goneoff = "N";
-      if (goneoffNum !== 0) {
-        var hours = Math.floor(goneoffNum / 60);
-        var minutes = goneoffNum - hours * 60;
-        var hoursStr = MorpheuzCommon.fixLen(String(hours));
-        var minutesStr = MorpheuzCommon.fixLen(String(minutes));
-        goneoff = hoursStr + minutesStr;
-      }
-      console.log("MSG goneoff=" + goneoff);
-      var previousGoneOff = MorpheuzUtil.getNoDef("goneOff");
-      MorpheuzUtil.setNoDef("goneOff", goneoff);
-      ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlGoneOffDone | MorpheuzConfig.mConst().ctrlDoNext;
-      MorpheuzTimeline.addSummaryPin(true);
-      if (goneoff !== previousGoneOff) {
-        MorpheuzTimeline.addSmartAlarmPin();
-        MorpheuzAjax.turnLifxLightsOn();
-        MorpheuzHue.turnHueLightsOn();
-        MorpheuzIFTTT.iftttMakerInterfaceAlarm();
-      } else {
-        console.log("Only summary pin redone - gone off repeated");
-      }
+    // Ricezione passi
+    if (typeof e.payload.keySteps !== "undefined") {
+      var steps = parseInt(e.payload.keySteps, 10);
+      console.log("MSG steps=" + steps);
+      MorpheuzUtil.setNoDef("steps", steps);
+      ctrlVal = ctrlVal | MorpheuzConfig.mConst().ctrlDoNext;
     }
 
     // Incoming data point
@@ -385,89 +221,133 @@
   });
 
   /*
+   * Invio dati a MQTT Bridge o Home Assistant Webhook
+   */
+  function transmitHA() {
+    var url = MorpheuzUtil.getNoDef("haurl");
+    var token = MorpheuzUtil.getNoDef("hatoken");
+
+    if (!url || url === "" || url === "null") { console.log("HA: URL non configurato. Invio annullato."); return; }
+    if (!token || token === "" || token === "null") { console.log("HA: Token non configurato. Invio annullato."); return; }
+
+    // Pulizia URL: rimuove spazi e slash finale, assicura il protocollo http
+    console.log("HA: URL letto: '" + url + "'");
+    console.log("HA: Token letto (parziale per sicurezza): '" + token.substring(0, 5) + "...'");
+    url = url.trim();
+    if (url.charAt(url.length - 1) === '/') {
+      url = url.substring(0, url.length - 1);
+    }
+    if (url.indexOf('http') !== 0) {
+      url = 'http://' + url;
+    }
+
+    console.log("HA: URL dopo la pulizia: '" + url + "'");
+    console.log("HA: Token dopo la pulizia (parziale per sicurezza): '" + token.substring(0, 5) + "...'");
+    // Pulizia Token: rimuove spazi, ritorni a capo e caratteri invisibili
+    token = token.replace(/(\r\n|\n|\r)/gm, "").trim();
+
+    // Recupero dati con valori di fallback per evitare 'null'
+    var base = MorpheuzUtil.getWithDef("base", 0);
+    var goneOff = MorpheuzUtil.getWithDef("goneOff", "N");
+    var snoozes = MorpheuzUtil.getWithDef("snoozes", 0);
+    var steps = MorpheuzUtil.getWithDef("steps", 0);
+
+    var deep_mins = 0;
+    var light_mins = 0;
+    var awake_mins = 0;
+    for (var i = 0; i < MorpheuzConfig.mConst().limit; i++) {
+      var p = MorpheuzUtil.getNoDef("P" + i);
+      if (p !== null) {
+        var val = parseInt(p, 10);
+        if (val > 0) { // Escludiamo i valori nulli (-1) e ignorati (-2)
+          if (val <= 40) { // DEEP_SLEEP_THRESHOLD (come definito nel C)
+            deep_mins += 10;
+          } else if (val < 120) { // LIGHT_ABOVE (come definito nel C)
+            light_mins += 10;
+          } else {
+            awake_mins += 10;
+          }
+        }
+      }
+    }
+
+    var endpoint = url + "/api/states/sensor.igi_activity";
+
+    var payload = {
+      state: parseInt(steps, 10), // Lo stato principale ora mostra il numero di passi come numero
+      attributes: {
+        unique_id: "morpheuz_igi_activity_monitor",
+        base: parseInt(base, 10),
+        goneOff: goneOff,
+        snoozes: parseInt(snoozes, 10),
+        deep_sleep_min: deep_mins,
+        light_sleep_min: light_mins,
+        awake_min: awake_mins,
+        total_sleep_min: deep_mins + light_mins,
+        steps: parseInt(steps, 10),
+        exptime: new Date().toISOString(),
+        friendly_name: "Igi Activity Monitor",
+        unit_of_measurement: "steps"
+      }
+    };
+
+    console.log("HA: Invio dati a " + endpoint + " con payload: " + JSON.stringify(payload));
+    var req = new XMLHttpRequest();
+    req.open('POST', endpoint, true);
+    req.setRequestHeader('Content-Type', 'application/json');
+    req.setRequestHeader("Authorization", "Bearer " + token);
+
+    req.onload = function() {
+        if (req.status === 200 || req.status === 201) {
+            console.log("HA Update Success: " + req.status);
+        } else {
+            console.log("HA Update Failed: " + req.status + " " + req.responseText);
+        }
+    };
+
+    req.onerror = function() {
+        console.log("HA Network Error");
+    };
+
+    req.send(JSON.stringify(payload));
+  }
+
+  /*
    * Transmit method list
    */
   function transmitMethods() {
-    // Protect against double send without resetting
-    var transmitDone = MorpheuzUtil.getNoDef("transmitDone");
-    if (transmitDone !== null) {
-      console.log("transmit already done");
-      return;
-    }
 
     // Sends
-    MorpheuzUsage.googleAnalytics();
-    MorpheuzPushover.pushoverTransmit();
-    MorpheuzSWP.smartwatchProTransmit();
-    MorpheuzIFTTT.iftttMakerInterfaceData();
-    MorpheuzTimeline.addSummaryPin(false);
-    MorpheuzTimeline.addBedTimePin();
-    MorpheuzEmail.automaticEmailExport();
+    transmitHA();
 
     // Protect and report time
     MorpheuzUtil.setNoDef("transmitDone", "done");
     MorpheuzUtil.setNoDef("exptime", new Date().format(MorpheuzConfig.mConst().displayDateFmt));
   }
 
-  /*
-   * Monitor the closing of the config/display screen so as we can do a save if
-   * needed
-   */
   Pebble.addEventListener("webviewclosed", function(e) {
-    console.log("webviewclosed " + e.response);
+    if (e && !e.response) return;
+    var response = clay.getSettings(e.response, false);
+    var settings = {};
+    Object.keys(response).forEach(function(key) {
+      settings[key] = response[key].value;
+    });
 
-    // Nothing returned
-    if (e.response === null || typeof e.response === 'undefined') {
-      console.log("no config returned");
-      return;
-    }
-
-    // Even then a lack of trust is reasonable
-    var configData;
-    try {
-      configData = JSON.parse(decodeURIComponent(e.response));
-    } catch (err) {
-      console.log("no config returned");
-      return;
-    }
-
-    // Process
-    if (configData.action === "save") {
-      MorpheuzUtil.setNoDef("emailto", configData.emailto);
-      MorpheuzUtil.setNoDef("pouser", configData.pouser);
-      MorpheuzUtil.setNoDef("potoken", configData.potoken);
-      MorpheuzUtil.setNoDef("swpdo", configData.swpdo);
-      MorpheuzUtil.setNoDef("usage", configData.usage);
-      MorpheuzUtil.setNoDef("lazarus", configData.lazarus);
-      MorpheuzUtil.setNoDef("lifx-token", configData.lifxtoken);
-      MorpheuzUtil.setNoDef("lifx-time", configData.lifxtime);
-      MorpheuzUtil.setNoDef("hueip", configData.hueip);
-      MorpheuzUtil.setNoDef("hueusername", configData.hueuser);
-      MorpheuzUtil.setNoDef("hueid", configData.hueid);
-      MorpheuzUtil.setNoDef("ifkey", configData.ifkey);
-      MorpheuzUtil.setNoDef("ifserver", configData.ifserver);
-      MorpheuzUtil.setNoDef("age", configData.age);
-      MorpheuzUtil.setNoDef("doemail", configData.doemail);
-
-      // Test if requested
-      if (configData.testsettings === "Y") {
-        console.log("Test settings requested");
-        MorpheuzPushover.pushoverTransmit();
-        MorpheuzAjax.turnLifxLightsOn();
-        MorpheuzHue.turnHueLightsOn();
-        MorpheuzIFTTT.iftttMakerInterfaceAlarm();
-        MorpheuzIFTTT.iftttMakerInterfaceData();
-        MorpheuzIFTTT.iftttMakerInterfaceBedtime();
-        MorpheuzEmail.automaticEmailExport();
-      }
-    }
+    // Mappa le impostazioni di Clay nel formato utilizzato da Morpheuz
+    MorpheuzUtil.setNoDef("haurl", settings.haurl);
+    MorpheuzUtil.setNoDef("hatoken", settings.hatoken);
   });
 
   /*
    * Show the config/display page - this will show a graph and allow a reset
    */
   Pebble.addEventListener("showConfiguration", function(e) {
-    Pebble.openURL(MorpheuzUtil.buildUrl("N"));
+    var settings = {
+      "haurl": MorpheuzUtil.getNoDef("haurl"),
+      "hatoken": MorpheuzUtil.getNoDef("hatoken")
+    };
+    console.log("Opening Clay with settings: " + JSON.stringify(settings));
+    Pebble.openURL(clay.generateUrl(settings));
   });
 
   /*

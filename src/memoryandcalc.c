@@ -104,7 +104,6 @@ static void in_received_handler(DictionaryIterator *iter, void *context) {
     // If transmit is done then mark it
     if (ctrl_value & CTRL_TRANSMIT_DONE) {
       internal_data.transmit_sent = true;
-      set_icon(true, IS_EXPORT);
       // If we're waiting for previous nights data to be sent, it now has been, reset and go
       if (complete_outstanding) {
         app_timer_register(COMPLETE_OUTSTANDING_MS, reset_sleep_period_action, NULL);
@@ -119,15 +118,9 @@ static void in_received_handler(DictionaryIterator *iter, void *context) {
     // If version is done then mark it
     if (ctrl_value & CTRL_VERSION_DONE) {
       version_sent = true;
-      config_data.lazarus = ctrl_value & CTRL_LAZARUS;
       trigger_config_save();
     }
 
-    // If gone off is done then mark that
-    if (ctrl_value & CTRL_GONEOFF_DONE) {
-      internal_data.gone_off_sent = true;
-    }
-    
     // If snoozes have been registered is done then mark that
     if (ctrl_value & CTRL_SNOOZES_DONE) {
       internal_data.snoozes_sent = true;
@@ -246,7 +239,6 @@ EXTFN void read_internal_data() {
   internal_data_checksum = dirty_checksum(&internal_data, sizeof(internal_data));
   analogue_set_base(internal_data.base);
   set_progress_based_on_persist();
-  set_icon(internal_data.transmit_sent, IS_EXPORT);
   app_timer_register(PERSIST_MEMORY_MS, save_internal_data_timer, NULL);
 }
 
@@ -274,13 +266,6 @@ EXTFN void save_config_data(void *data) {
  */
 static void clear_config_data() {
   memset(&config_data, 0, sizeof(config_data));
-  config_data.fromhr = FROM_HR_DEF;
-  config_data.frommin = FROM_MIN_DEF;
-  config_data.tohr = TO_HR_DEF;
-  config_data.tomin = TO_MIN_DEF;
-  config_data.from = to_mins(FROM_HR_DEF,FROM_MIN_DEF);
-  config_data.to = to_mins(TO_HR_DEF,TO_MIN_DEF);
-  config_data.lazarus = true;
   config_data.config_ver = CONFIG_VER;
 }
 
@@ -317,7 +302,6 @@ EXTFN void trigger_config_save() {
 static void reset_resend_common() {
     internal_data.last_sent = LAST_SENT_INIT;
     last_error_code_sent = 0;
-    set_icon(false, IS_EXPORT);
     previous_to_phone = DUMMY_PREVIOUS_TO_PHONE;
 }
 
@@ -326,6 +310,11 @@ static void reset_resend_common() {
  */
 static void reset_sleep_period_action(void *data) {
   complete_outstanding = false;
+  
+  // Archivia i dati del giorno appena concluso PRIMA di resettare i dati correnti
+  archive_daily_data();
+
+  // Resetta i dati della sessione di sonno corrente
   clear_internal_data();
   reset_resend_common();
   internal_data.base = time(NULL);
@@ -335,19 +324,10 @@ static void reset_sleep_period_action(void *data) {
   analogue_set_base(internal_data.base);
   set_progress_based_on_persist();
   set_next_wakeup();
-  if (config_data.smart) {
-    #ifdef VOICE_SUPPORTED
-      char end_time[TIME_RANGE_LEN];
-      copy_end_time_into_field(end_time, TIME_RANGE_LEN);
-      show_notice_with_message(RESOURCE_ID_NOTICE_TIMER_RESET_ALARM_FOR, end_time);
-    #else
-      show_notice(RESOURCE_ID_NOTICE_TIMER_RESET_ALARM);
-    #endif
-    vibes_double_pulse();
-  } else {
-    show_notice(RESOURCE_ID_NOTICE_TIMER_RESET_NOALARM);
-    vibes_short_pulse();
-  } 
+  show_notice(RESOURCE_ID_NOTICE_TIMER_RESET_NOALARM);
+  vibes_short_pulse();
+
+  // Nota: i passi ora vengono resettati solo a mezzanotte in rootui.c per precisione giornaliera
 }
 
 /*
@@ -376,7 +356,6 @@ EXTFN void resend_all_data(bool invoked_by_change_of_time) {
     return; // If we've already sent the end marker then don't send again on change of times, we'll do this on next reset.
   }
   reset_resend_common();
-  internal_data.gone_off_sent = false;
   internal_data.transmit_sent = false;
   internal_data.snoozes_sent = false;
 }
@@ -441,69 +420,6 @@ static void store_point_info(uint16_t point) {
   set_progress_based_on_persist();
 }
 
-/*
- * Perform smart alarm function
- */
-static bool smart_alarm(uint16_t point) {
-
-  uint32_t now;
-  uint32_t before;
-  uint32_t after;
-
-  // Are we doing smart alarm thing, we are and it has already happened or the user has requested a stop
-  if (!config_data.smart || internal_data.gone_off > 0 || internal_data.stopped)
-    return false;
-
-  // Are we in the right timeframe
-  time_t timeNow = time(NULL);
-  struct tm *time = localtime(&timeNow);
-  now = to_mins(time->tm_hour, time->tm_min);
-
-  if (now >= config_data.from && now < config_data.to) {
-
-    // Work out the average
-    bool sleeping = false;
-    int32_t total = 0;
-    int32_t novals = 0;
-    for (uint8_t i = 0; i <= internal_data.highest_entry; i++) {
-      if (!internal_data.ignore[i]) {
-        // Ignore points until we have one where we are not moving for 10 minutes and it is a point we have finished with (points in progress can built up
-        // value over the 10 minute period)
-        if (!sleeping && internal_data.points[i] <= AWAKE_ABOVE && i < internal_data.highest_entry) {
-          sleeping = true;
-        }
-        if (sleeping) {
-          novals++;
-          total += internal_data.points[i];
-        } 
-      }
-    }
-
-    // Avoid a divide by zero. If this happens then it will trigger the alarm immediately.
-    int32_t threshold = novals > 0 ? total / novals : 0;
-
-    // Has the current point exceeded the threshold value
-    if (point > threshold) {
-      internal_data.gone_off = now;
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-  before = now - 1;
-  after = now + 1;
-
-  // Or failing that have we hit the last minute we can
-  if (now == config_data.to || before == config_data.to || after == config_data.to) {
-    internal_data.gone_off = now;
-    return true;
-  }
-
-  // None of the above
-  return false;
-}
-
 static void transmit_points_or_background_data(int8_t last_sent) {
 
   LOG_DEBUG("transmit_points_or_background_data %d", last_sent);
@@ -512,12 +428,6 @@ static void transmit_points_or_background_data(int8_t last_sent) {
   switch (last_sent) {
     case -4:
       send_to_phone(KEY_AUTO_RESET, config_data.auto_reset ? 1 : 0);
-      break;
-    case -3:
-      send_to_phone(KEY_FROM, config_data.smart ? (int32_t) config_data.from : -1);
-      break;
-    case -2:
-      send_to_phone(KEY_TO, config_data.smart ? (int32_t) config_data.to : -1);
       break;
     case -1:
       send_to_phone(KEY_BASE, internal_data.base);
@@ -571,10 +481,6 @@ static void transmit_next_data(void *data) {
   if (internal_data.last_sent >= internal_data.highest_entry) {
     if (internal_data.snoozes > 0 && !internal_data.snoozes_sent) {
       send_to_phone(KEY_SNOOZES, internal_data.snoozes);
-      internal_data.gone_off_sent = false;
-    } else if (internal_data.gone_off > 0 && !internal_data.gone_off_sent) {
-      store_chart_data();
-      send_to_phone(KEY_GONEOFF, internal_data.gone_off);
     } else if (!internal_data.transmit_sent && internal_data.has_been_reset && at_limit(calc_offset())) {
       store_chart_data();
       send_to_phone(KEY_TRANSMIT, 0);
@@ -591,22 +497,22 @@ static void transmit_next_data(void *data) {
  * Storage of points, raising of smart alarm and transmission to phone
  */
 EXTFN void server_processing(uint16_t biggest) {
-  // Provide an information message
-  if (!internal_data.has_been_reset) {
-    if (no_record_warning && is_animation_complete()) {
-      show_notice(RESOURCE_ID_NOTICE_RESET_TO_START_USING);
-      no_record_warning = false;
-    }
+  // Attivazione automatica: se Bluetooth disconnesso e nessuna sessione attiva, avvia il monitoraggio
+  if (!internal_data.has_been_reset && !bluetooth_connection_service_peek()) {
+    internal_data.base = time(NULL);
+    internal_data.has_been_reset = true;
+    internal_data.stopped = false;
+    internal_data.highest_entry = 0;
+    internal_data.last_sent = LAST_SENT_INIT;
+    memset(internal_data.points, 0, sizeof(internal_data.points));
+    memset(internal_data.ignore, 0, sizeof(internal_data.ignore));
+    analogue_set_base(internal_data.base);
+    LOG_INFO("Monitoraggio sonno avviato automaticamente (Bluetooth assente)");
   }
 
-  // Store data
+  // Memorizza i dati di movimento indipendentemente dallo stato del Bluetooth
   store_point_info(biggest);
-    
-  // Check smart alarm
-  if (smart_alarm(biggest)) {
-      fire_alarm();
-  }
 
-  // Check to see if we need to transmit data
+  // Check to see if we need to transmit data (sempre attivo per sincronizzare passi e impostazioni)
   transmit_data();
 }

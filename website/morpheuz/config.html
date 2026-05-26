@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Configurazione Morpheuz</title>
+    <!-- Utilizzo del framework Slate per un look nativo Pebble -->
+    <link rel="stylesheet" href="https://cdn.rawgit.com/pebble/slate/master/dist/css/slate.min.css">
+    <style>
+      body { background-color: #f0f0f0; }
+      .header { padding: 20px 10px; text-align: center; background: #333; color: white; margin-bottom: 20px; }
+      .header h1 { margin: 0; font-size: 1.5em; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Morpheuz Settings</h1>
+    </div>
+
+    <div class="item-container">
+      <div class="item-container-header">Sveglia Intelligente</div>
+      <div class="item-container-content">
+        <label class="item">
+          Abilita Sveglia
+          <input type="checkbox" class="item-toggle" id="smart_alarm_toggle" checked>
+        </label>
+        <label class="item">
+          Finestra di attivazione (min)
+          <input type="range" class="item-slider" id="alarm_window_slider" value="30" min="10" max="60" step="5">
+          <div class="item-input-wrapper">
+            <input type="text" class="item-input" id="alarm_window_text" value="30" readonly>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <div class="item-container">
+      <div class="item-container-header">Preferenze Grafico (jqPlot)</div>
+      <div class="item-container-content">
+        <label class="item">
+          Mostra Legenda
+          <input type="checkbox" class="item-toggle" id="show_legend" checked>
+        </label>
+        <label class="item">
+          Colore Serie Primaria
+          <input type="color" class="item-color" id="series_color" value="#4bb2c5">
+        </label>
+      </div>
+    </div>
+
+    <div class="item-container">
+      <div class="button-container">
+        <input type="button" class="item-button" id="save_btn" value="SALVA">
+      </div>
+    </div>
+
+    <script>
+      // Gestione sincronizzazione slider
+      var slider = document.getElementById('alarm_window_slider');
+      var sliderText = document.getElementById('alarm_window_text');
+      slider.addEventListener('input', function() {
+        sliderText.value = slider.value;
+      });
+
+      // Utility per leggere i parametri attuali dall'URL (passati dall'app)
+      function getParam(name) {
+        var results = new RegExp('[\?&]' + name + '=([^&#]*)').exec(window.location.href);
+        return results ? decodeURIComponent(results[1]) : null;
+      }
+
+      // Inizializzazione della pagina con i valori correnti
+      function init() {
+        var alarm = getParam('smart_alarm');
+        if (alarm === 'false') document.getElementById('smart_alarm_toggle').checked = false;
+        
+        var windowVal = getParam('alarm_window');
+        if (windowVal) {
+          slider.value = windowVal;
+          sliderText.value = windowVal;
+        }
+
+        var color = getParam('color');
+        if (color) document.getElementById('series_color').value = '#' + color;
+      }
+
+      // Funzione di salvataggio: invia i dati all'app tramite lo schema URI pebblejs://
+      document.getElementById('save_btn').addEventListener('click', function() {
+        var config = {
+          'smart_alarm': document.getElementById('smart_alarm_toggle').checked,
+          'alarm_window': parseInt(slider.value),
+          'show_legend': document.getElementById('show_legend').checked,
+          'color': document.getElementById('series_color').value.replace('#', '')
+        };
+
+        // Chiude la pagina e invia i dati tramite l'hash dell'URL
+        var return_to = getParam('return_to') || 'pebblejs://close#';
+        window.location.href = return_to + encodeURIComponent(JSON.stringify(config));
+      });
+
+      init();
+    </script>
+  </body>
+</html>

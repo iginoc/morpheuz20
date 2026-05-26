@@ -42,7 +42,7 @@ VERSION_EXTERNAL;
 static BitmapLayerComp round_background;
 static Layer *analogue_time_layer;
 static int current_hour, current_minutes; 
-static char version_txt[5];
+static char version_txt[10];
 
 // Shared with rootui, rectui, roundui, primary_window with main and notice_font with noticewindows
 extern UiCommon ui;

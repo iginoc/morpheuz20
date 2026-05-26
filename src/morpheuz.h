@@ -25,8 +25,12 @@
 #ifndef MORPHEUZ_H_
 #define MORPHEUZ_H_
 
+#ifndef PBL_WORKER
 #include "pebble.h"
 #include "pebble_process_info.h"
+#else
+#include <pebble_worker.h>
+#endif
 
 // Comment out for production build - leaves errors on BASALT/CHALK and nothing on APLITE as this is much tighter for memory
 //#define TESTING_BUILD
@@ -53,17 +57,9 @@
   #define LOG_DEBUG(fmt, args...) 
 #endif
 
-#ifdef PBL_MICROPHONE
-  #define VOICE_SUPPORTED
-#else 
-  #define is_voice_system_active() (false)
-#endif
+#define is_voice_system_active() (false)
 
-// APLITE is optimised for space, BASALT/CHALK and above are optimised for battery life
-#ifndef PBL_PLATFORM_APLITE
-  #define CACHE_ICONS
-  #define ENABLE_CHART_VIEWER
-#endif
+//#define CACHE_ICONS // Enable icon caching for Aplite - Disabled to save RAM
   
 // Only do this to make greping for external functions easier (lot of space to be saved with statics)
 #define EXTFN
@@ -86,10 +82,6 @@
 
 #define DUMMY_PREVIOUS_TO_PHONE 0xFFFFFFFF
 
-#define POWER_NAP_MINUTES 27
-// #define POWER_NAP_MINUTES 1 
-  
-#define POWER_NAP_SETTLE 2
 #define CLOCK_UPDATE_THRESHOLD AWAKE_ABOVE
 #define SNOOZE_PERIOD_MS (9*60*1000)
 #define POST_MENU_ACTION_DISPLAY_UPDATE_MS 900
@@ -163,6 +155,7 @@
 #define PROGRESS_STEP                PBL_IF_COLOR_ELSE(24,12)
 
 // These save space and time to run and a direct cast is claimed to be supported in the documentation
+#ifndef PBL_WORKER
 #define bitmap_layer_get_layer_jf(x) ((Layer *)(x))
 #define text_layer_get_layer_jf(x) ((Layer *)(x))
 #define inverter_layer_get_layer_jf(x) ((Layer *)(x))
@@ -170,19 +163,18 @@
 
 #define to_mins(h,m) (((h) * 60) + (m))
 
+#endif
 #define tolower(a) ((('A' <= a) && (a <= 'Z')) ? ('a' + (a - 'A')) : (a))
 
 #define  KEY_POINT  MESSAGE_KEY_keyPoint
 #define  KEY_CTRL  MESSAGE_KEY_keyCtrl
-#define  KEY_FROM  MESSAGE_KEY_keyFrom
-#define  KEY_TO MESSAGE_KEY_keyTo
 #define  KEY_BASE MESSAGE_KEY_keyBase
 #define  KEY_VERSION MESSAGE_KEY_keyVersion
-#define  KEY_GONEOFF MESSAGE_KEY_keyGoneoff
 #define  KEY_TRANSMIT MESSAGE_KEY_keyTransmit
 #define  KEY_AUTO_RESET MESSAGE_KEY_keyAutoReset
 #define  KEY_SNOOZES MESSAGE_KEY_keySnoozes
 #define  KEY_FAULT MESSAGE_KEY_keyFault
+#define  KEY_STEPS MESSAGE_KEY_keySteps
 
 enum CtrlValues {
   CTRL_TRANSMIT_DONE = 1,
@@ -198,10 +190,7 @@ typedef enum {
   IS_COMMS = 0,
   IS_RECORD,
   IS_IGNORE,
-  IS_ALARM,
-  IS_ALARM_RING,
   IS_BLUETOOTH,
-  IS_EXPORT
 } IconState;
 
 enum ErrorCodes {
@@ -217,9 +206,10 @@ enum Thresholds {
     LIGHT_ABOVE = 120 
 };
 
-#define MAX_ICON_STATE 8
+#define MAX_ICON_STATE 6
 
 #define PERSIST_MEMORY_KEY 12121
+#include "persist_keys.h" // Includiamo le chiavi persistenti comuni
 #define PERSIST_CONFIG_KEY 12122
 #define PERSIST_PRESET_KEY 12123
 #define PERSIST_CHART_KEY 12124
@@ -251,12 +241,16 @@ enum Thresholds {
 #define WAKEUP_LAZARUS 3
 #define ONE_MINUTE 60
 
+#define STEP_GOAL 10000 // Obiettivo passi giornaliero
+#define DEEP_SLEEP_THRESHOLD 40 // Soglia per distinguere sonno profondo da leggero
+#define NUM_DAILY_STEP_HISTORY_DAYS 7 // Numero di giorni per la cronologia passi
+
 #define EARLY_PRESET 0
 #define MEDIUM_PRESET 1
 #define LATE_PRESET 2
 
 // Change INTERNAL_VER only if the InternalData struct changes
-#define INTERNAL_VER 45
+#define INTERNAL_VER 46
 typedef struct {
   uint8_t internal_ver;
   uint32_t base;
@@ -272,32 +266,43 @@ typedef struct {
   uint8_t snoozes;
   bool snoozes_sent;
   uint8_t error_code;
+  // Per Aplite, questo è un fallback. Per Health, è il conteggio corrente.
+  uint32_t steps;
 } InternalData;
 
 // Change the CONFIG_VER only if the ConfigData struct changes
-#define CONFIG_VER 42
+#define CONFIG_VER 46
 typedef struct {
   uint8_t config_ver;
-  bool unusedA;
   bool analogue;
-  bool smart;
   bool auto_reset;
-  bool lazarus;
   uint8_t autohr;
   uint8_t automin;
-  uint8_t fromhr;
-  uint8_t frommin;
-  uint8_t tohr;
-  uint8_t tomin;
-  uint32_t from;
-  uint32_t to;
-  time_t unusedB;
 } ConfigData;
 
+#ifndef PBL_WORKER
 typedef struct {
   BitmapLayer *layer;
   GBitmap *bitmap;
 } BitmapLayerComp;
+#endif
+
+// Cache bitmap definitions
+typedef enum {
+  BMP_CACHE_BATTERY_ICON,
+  BMP_CACHE_BATTERY_CHARGE,
+  BMP_CACHE_COMMS_ICON,
+  BMP_CACHE_BLUETOOTH_ICON,
+  BMP_CACHE_ICON_RECORD,
+  BMP_CACHE_ALARM_RING_ICON,
+  BMP_CACHE_ALARM_ICON,
+  BMP_CACHE_IGNORE
+} BmpCache;
+
+#ifndef PBL_WORKER
+#define gbitmap_create_with_resource_cache(res, cache) gbitmap_create_with_resource(res)
+#define gbitmap_destroy_cache(bmp) gbitmap_destroy(bmp)
+#endif
 
 // Version from App Info stuff (undocumented)
 #define VERSION_EXTERNAL extern const PebbleProcessInfo __pbl_app_info
@@ -305,6 +310,7 @@ typedef struct {
 #define VERSION_MINOR (__pbl_app_info.process_version.minor)
 #define APP_NAME (__pbl_app_info.name)
 
+#ifndef PBL_WORKER
 // Externals
 ConfigData *get_config_data();
 InternalData *get_internal_data();
@@ -312,7 +318,6 @@ Layer * macro_layer_create(GRect frame, Layer *parent, LayerUpdateProc update_pr
 TextLayer* macro_text_layer_create(GRect frame, Layer *parent, GColor tcolor, GColor bcolor, GFont font, GTextAlignment text_alignment);
 bool get_icon(IconState icon);
 bool is_animation_complete();
-bool is_doing_powernap();
 bool is_monitoring_sleep();
 bool is_notice_showing();
 char* am_pm_text(uint8_t hour);
@@ -325,21 +330,16 @@ int32_t join_value(int16_t top, int16_t bottom);
 uint16_t every_minute_processing();
 uint8_t twenty_four_to_twelve(uint8_t hour);
 void analogue_minute_tick();
-void analogue_powernap_text(char *text);
 void analogue_set_base(time_t base);
 void analogue_set_progress(uint8_t progress_level_in);
-void analogue_set_smart_times();
 void analogue_visible(bool visible, bool call_post_init);
 void analogue_window_load(Window *window);
 void analogue_window_unload();
 void bed_visible(bool value);
-void cancel_alarm();
 void close_morpheuz();
 #ifndef PBL_PLATFORM_APLITE
 void copy_time_range_into_field(char *field, size_t fsize, uint8_t fromhr, uint8_t frommin, uint8_t tohr, uint8_t tomin);
 #endif
-void copy_alarm_time_range_into_field(char *field, size_t fsize);
-void fire_alarm();
 void hide_notice_layer(void *data);
 void icon_bar_update_callback(Layer *layer, GContext *ctx);
 void init_morpheuz();
@@ -369,29 +369,17 @@ void set_icon(bool enabled, IconState icon);
 void set_ignore_on_current_time_segment();
 void set_next_wakeup();
 void set_progress();
-void set_smart_status();
-void set_smart_status_on_screen(bool smart_alarm_on, char *special_text);
-void show_alarm_visuals(bool value);
 void show_menu();
 void show_notice(uint32_t resource_id);
 void show_preset_menu();
-void show_set_alarm();
-void snooze_alarm();
-void toggle_power_nap();
 void trigger_config_save();
 void wakeup_init();
 void wakeup_toggle();
 
 #ifdef VOICE_SUPPORTED
-void set_using_preset(uint8_t no);
-void voice_control();
-void tidy_voice();
-bool is_voice_system_active();
-void show_notice_with_message(uint32_t resource_id, char *message);
-void voice_system_inactive();
-void copy_end_time_into_field(char *field, size_t fsize);
 #endif
 
+#ifndef PBL_WORKER // These are app-side functions
 #ifdef CACHE_ICONS
 void init_icon_cache();
 void destroy_icon_cache();
@@ -399,17 +387,26 @@ void destroy_icon_cache();
 #define init_icon_cache() 
 #define destroy_icon_cache() 
 #endif
+#endif // PBL_WORKER
+
+EXTFN void archive_daily_data();
+EXTFN void show_steps_chart();
+EXTFN bool is_steps_chart_showing();
+EXTFN void show_sleep_chart();
+EXTFN bool is_sleep_chart_showing();
 
 #ifdef ENABLE_CHART_VIEWER
-  void store_chart_data();
-  void show_chart();
-  bool is_chart_showing();
-  void chart_load(Window *window);
-  void chart_unload(Window *window);
+void store_chart_data();
+void show_chart();
+bool is_chart_showing();
+void chart_load(Window *window);
+void chart_unload(Window *window);
 #else
-  #define store_chart_data()
-  #define show_chart()
-  #define is_chart_showing() false
+#define store_chart_data()
+#define show_chart()
+#define is_chart_showing() false
 #endif
+
+#endif /* PBL_WORKER */
 
 #endif /* MORPHEUZ_H_ */

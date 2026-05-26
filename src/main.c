@@ -73,6 +73,17 @@ static void handle_init() {
   // Create primary window
   ui.primary_window = window_create();
 
+  // Avvia il background worker
+  // Questo "registra" l'app nel sistema come applicazione di background
+  AppWorkerResult result = app_worker_launch();
+  if (result == APP_WORKER_RESULT_SUCCESS) {
+    LOG_INFO("Background worker avviato: l'app è ora attiva in background.");
+  } else if (result == APP_WORKER_RESULT_ALREADY_RUNNING) {
+    LOG_INFO("Il worker è già attivo.");
+  } else {
+    LOG_ERROR("Impossibile avviare il worker: %d", result);
+  }
+
   // Go straight to chart if needed
 #ifdef ENABLE_CHART_VIEWER
   if (launch_reason() == APP_LAUNCH_TIMELINE_ACTION && launch_get_args() == TIMELINE_LAUNCH_CHART) {
@@ -100,8 +111,9 @@ EXTFN void close_morpheuz() {
 /*
  * Main
  */
+#ifndef PBL_WORKER
 EXTFN int main(void) {
   handle_init();
   app_event_loop();
-  lazarus();
 }
+#endif

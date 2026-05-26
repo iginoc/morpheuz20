@@ -31,23 +31,22 @@
 // Shared structure with rootui, rectui, roundui, primary_window with main and notice_font with noticewindows
 typedef struct {
   Window *primary_window;
-  Layer *icon_bar;
-  TextLayer *text_date_smart_alarm_range_layer;
   uint8_t animation_count;
+  GFont time_font;
+  GFont notice_font;
+  TextLayer *steps_layer;
+  TextLayer *sleep_layer; // Nuovo layer per i dati del sonno
   TextLayer *powernap_layer;
-  #ifdef PBL_COLOR
+  TextLayer *version_text;
+  TextLayer *text_date_smart_alarm_range_layer;
   TextLayer *text_time_shadow_layer;
-  #endif 
   TextLayer *text_time_layer;
-  uint8_t battery_level;
-  bool battery_plugged;
+  Layer *icon_bar;
+  Layer *progress_layer;
   BitmapLayerComp alarm_button_top;
   BitmapLayerComp alarm_button_button;
-  Layer *progress_layer;
-  GFont notice_font;
-  GFont time_font;
-  TextLayer *version_text;
+  uint8_t battery_level;
+  bool battery_plugged;
 } UiCommon;
 
 #endif
-

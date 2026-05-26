@@ -1,47 +1,34 @@
 {
     "author": "James Fowler",
-    "dependencies": {},
+    "dependencies": {
+        "pebble-clay": "^1.0.3"
+    },
     "keywords": [],
-    "name": "morpheuz",
+    "name": "igi-activity",
     "pebble": {
         "capabilities": [
-            "location",
-            "configurable"
+            "configurable",
+            "background"
         ],
-        "displayName": "Morpheuz",
+        "displayName": "igi-activity",
         "enableMultiJS": true,
+        "workerSource": "worker_src/worker.c",
         "messageKeys": [
             "keyPoint",
             "keyCtrl",
-            "keyFrom",
-            "keyTo",
             "keyBase",
             "keyVersion",
-            "keyGoneoff",
             "keyTransmit",
             "keyAutoReset",
             "keySnoozes",
-            "keyFault"
+            "keyFault",
+            "haurl",
+            "hatoken",
+            "keySteps"
         ],
         "projectType": "native",
         "resources": {
             "media": [
-                {
-                    "file": "images/round-title.png",
-                    "name": "IMAGE_ROUND_TITLE",
-                    "targetPlatforms": [
-                        "chalk"
-                    ],
-                    "type": "bitmap"
-                },
-                {
-                    "file": "images/round-background.png",
-                    "name": "IMAGE_ROUND_BACKGROUND",
-                    "targetPlatforms": [
-                        "chalk"
-                    ],
-                    "type": "bitmap"
-                },
                 {
                     "file": "images/record.png",
                     "name": "ICON_RECORD",
@@ -62,37 +49,25 @@
                 {
                     "file": "images/logo-text.png",
                     "name": "IMAGE_LOGO_TEXT",
-                    "targetPlatforms": [
-                        "aplite",
-                        "basalt"
-                    ],
+                    "targetPlatforms": null,
                     "type": "bitmap"
                 },
                 {
                     "file": "images/logo-sleeper.png",
                     "name": "IMAGE_LOGO_SLEEPER",
-                    "targetPlatforms": [
-                        "aplite",
-                        "basalt"
-                    ],
+                    "targetPlatforms": null,
                     "type": "bitmap"
                 },
                 {
                     "file": "images/logo-head.png",
                     "name": "IMAGE_LOGO_HEAD",
-                    "targetPlatforms": [
-                        "aplite",
-                        "basalt"
-                    ],
+                    "targetPlatforms": null,
                     "type": "bitmap"
                 },
                 {
                     "file": "images/logo-bed.png",
                     "name": "IMAGE_LOGO_BED",
-                    "targetPlatforms": [
-                        "aplite",
-                        "basalt"
-                    ],
+                    "targetPlatforms": null,
                     "type": "bitmap"
                 },
                 {
@@ -174,37 +149,21 @@
                 {
                     "file": "data/voice-unavailable.txt",
                     "name": "NOTICE_VOICE_UNAVAILABLE",
-                    "targetPlatforms": [
-                        "basalt",
-                        "chalk"
-                    ],
                     "type": "raw"
                 },
                 {
                     "file": "data/voice-recognition-stopped.txt",
                     "name": "NOTICE_VOICE_STOPPED",
-                    "targetPlatforms": [
-                        "basalt",
-                        "chalk"
-                    ],
                     "type": "raw"
                 },
                 {
                     "file": "data/voice-recognition-failed.txt",
                     "name": "NOTICE_VOICE_FAILED",
-                    "targetPlatforms": [
-                        "basalt",
-                        "chalk"
-                    ],
                     "type": "raw"
                 },
                 {
                     "file": "data/voice-didnt-understand.txt",
                     "name": "VOICE_DIDNT_UNDERSTAND",
-                    "targetPlatforms": [
-                        "basalt",
-                        "chalk"
-                    ],
                     "type": "raw"
                 },
                 {
@@ -215,18 +174,11 @@
                 {
                     "file": "data/timer-reset-alarm.txt",
                     "name": "NOTICE_TIMER_RESET_ALARM",
-                    "targetPlatforms": [
-                        "aplite"
-                    ],
                     "type": "raw"
                 },
                 {
                     "file": "data/timer-reset-alarm-for.txt",
                     "name": "NOTICE_TIMER_RESET_ALARM_FOR",
-                    "targetPlatforms": [
-                        "basalt",
-                        "chalk"
-                    ],
                     "type": "raw"
                 },
                 {
@@ -248,11 +200,9 @@
         },
         "sdkVersion": "3",
         "targetPlatforms": [
-            "aplite",
-            "basalt",
-            "chalk"
+            "aplite"
         ],
-        "uuid": "5be44f1d-d262-4ea6-aa30-ddbec1e3cab2",
+        "uuid": "2024dead-beef-4242-8888-000000000001",
         "watchapp": {
             "watchface": false
         }

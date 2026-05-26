@@ -152,14 +152,5 @@ EXTFN void manual_shutdown_request() {
  * Determine if kill was unexpected and schedule wake up
  */
 EXTFN void lazarus() {
-  // If morpheuz is monitoring sleep (or powernap), and the quit menu or exit hasn't been pressed in
-  // the last 5 seconds then schedule a wakeup in 5 minutes. Hence Lazarus - wake from the dead.
-  // We also have a config option on this to ensure it can be disabled if undesirable
-  if (get_config_data()->lazarus && is_monitoring_sleep() && (requested_exit + FIVE_SECONDS <= time(NULL))) {
-    time_t timestamp = time(NULL) + FIVE_MINUTES;
-    build_wakeup_entry(timestamp, WAKEUP_LAZARUS);
-    LOG_ERROR("Abnormal exit, reboot in 5 mins");
-  } else {
-    LOG_ERROR("Requested exit");
-  }
+  // Lazarus logic removed as app is now registered as a background activity tracker.
 }

@@ -87,9 +87,6 @@ static void reset_chart_data() {
   chart_data.highest_entry = 59;
   chart_data.base = 1460759878;
   chart_data.gone_off = 404;
-  chart_data.from = 390;
-  chart_data.to = 435;
-  chart_data.smart = true;
   #else
   chart_data.base = 0;
   #endif
@@ -129,9 +126,6 @@ EXTFN void store_chart_data() {
     chart_data.ignore[i] = get_internal_data()->ignore[i];
   }
   chart_data.snoozes = get_internal_data()->snoozes;
-  chart_data.from = get_config_data()->from;
-  chart_data.to = get_config_data()->to;
-  chart_data.smart = get_config_data()->smart;
   save_chart_data();
 }
 
@@ -275,38 +269,6 @@ static void bar_layer_update_callback(Layer *layer, GContext *ctx) {
     uint32_t base_hrs_mins = to_mins(time->tm_hour, time->tm_min);
 
     uint32_t before = 0;
-
-    // Only bother with the smart alarm markers if there actually was one set
-    if (chart_data.smart) {
-      
-      // Paint smart alarm start blobby
-      before = base_hrs_mins;
-      for (uint8_t i = 0; i <= LIMIT; i++) {
-        uint32_t after = next_after(before);
-        if (chart_data.from >= before && chart_data.from <= after) {
-          int32_t early_left = x_from_position(i) - stroke_width;
-          graphics_context_set_stroke_color(ctx, CHART_SLEEP_SMART_EARLIEST_COLOR);
-          graphics_context_set_fill_color(ctx, CHART_SLEEP_SMART_EARLIEST_COLOR);
-          graphics_fill_rect(ctx, GRect(early_left,bar_height - 5, stroke_width * 2, 5), 0, GCornerNone);
-          break;
-        }
-        before = after;
-      }
-
-      // Paint smart alarm end blobby
-      before = base_hrs_mins;
-      for (uint8_t i = 0; i <= LIMIT; i++) {
-        uint32_t after = next_after(before);
-        if (chart_data.to >= before && chart_data.to <= after) {
-          int32_t late_left = x_from_position(i) - stroke_width;
-          graphics_context_set_stroke_color(ctx, CHART_SLEEP_SMART_LATEST_COLOR);
-          graphics_context_set_fill_color(ctx, CHART_SLEEP_SMART_LATEST_COLOR);
-          graphics_fill_rect(ctx, GRect(late_left,bar_height - 5, stroke_width * 2, 5), 0, GCornerNone);
-          break;
-        }
-        before = after;
-      }
-    }
 
     // Work out the wake up point
     if (chart_data.gone_off != 0) {
